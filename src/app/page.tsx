@@ -260,6 +260,8 @@ export default function Home() {
   const [invalidCells, setInvalidCells] = React.useState<Set<string>>(
     () => new Set()
   );
+  const [timeoutModalOpen, setTimeoutModalOpen] = React.useState(false);
+  const [timeoutAlgo, setTimeoutAlgo] = React.useState<string | null>(null);
 
   React.useEffect(() => {
     const storedTheme = window.localStorage.getItem("theme");
@@ -370,6 +372,19 @@ export default function Home() {
     setExecutionTime(null);
     setUsedAlgorithm(null);
     setComparison(null);
+    setTimeoutModalOpen(false);
+    setTimeoutAlgo(null);
+
+    const controller = new AbortController();
+    let timeoutId: ReturnType<typeof setTimeout> | null = null;
+
+    const isSlowAlgorithm =
+      algorithm === "hashmap_dfs" || algorithm === "brute_dfs";
+    const TIMEOUT_MS = isSlowAlgorithm ? 8000 : 30000;
+
+    timeoutId = setTimeout(() => {
+      controller.abort();
+    }, TIMEOUT_MS);
 
     try {
       const payload: Record<string, unknown> = {
@@ -390,7 +405,10 @@ export default function Home() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
+        signal: controller.signal,
       });
+
+      if (timeoutId) clearTimeout(timeoutId);
 
       if (!response.ok) {
         throw new Error("Solver response not available");
@@ -458,10 +476,24 @@ export default function Home() {
       if (typeof data.algorithm === "string") {
         setUsedAlgorithm(data.algorithm);
       }
-    } catch {
+    } catch (error) {
+      if (error instanceof Error && error.name === "AbortError") {
+        if (isSlowAlgorithm) {
+          setTimeoutAlgo(
+            algorithm === "hashmap_dfs" ? "HashMap + DFS" : "Brute Force + DFS"
+          );
+          setTimeoutModalOpen(true);
+          setAlgorithm("trie_dfs");
+          handleClearBoard();
+          setIsSolving(false);
+          if (timeoutId) clearTimeout(timeoutId);
+          return;
+        }
+      }
       setResults(buildFallbackResults(board, minLength));
     } finally {
       setIsSolving(false);
+      if (timeoutId) clearTimeout(timeoutId);
     }
   };
 
@@ -859,6 +891,36 @@ export default function Home() {
                   <li><strong>Brute Force + DFS:</strong> Explores all paths up to max word length, then checks against dictionary. No pruning at all.</li>
                   <li><strong>Compare All:</strong> Runs all three and shows a speed comparison table.</li>
                 </ul>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+      )}
+
+      {timeoutModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4">
+          <Card className="w-full max-w-md border border-outline-variant bg-surface shadow-ambient">
+            <CardHeader className="flex flex-row items-center justify-between pb-2">
+              <CardTitle className="text-base">Search Timeout</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-4 text-sm text-on-surface-variant">
+              <p>
+                The <strong>{timeoutAlgo}</strong> algorithm took too long to
+                search this board and has been stopped to keep the app
+                responsive.
+              </p>
+              <p>
+                We automatically switched to <strong>Trie + DFS</strong> and
+                cleared the board for you. Trie + DFS is much faster because
+                it prunes dead branches early using a prefix tree.
+              </p>
+              <div className="flex justify-end">
+                <Button
+                  variant="default"
+                  onClick={() => setTimeoutModalOpen(false)}
+                >
+                  OK
+                </Button>
               </div>
             </CardContent>
           </Card>
